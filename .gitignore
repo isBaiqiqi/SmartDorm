@@ -1,0 +1,9 @@
+# 文件夹
+.idea/
+android/
+ios/
+build/
+
+
+# 文件
+*.user
