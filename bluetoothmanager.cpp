@@ -43,7 +43,7 @@ BluetoothManager::BluetoothManager(QObject *parent) : QObject(parent) {
         enqueueServoByte(kDoorResetAngle);
         m_doorPulsing = false;
         emit doorPulsingChanged();
-        setStatus(QStringLiteral("已复位至 %1°，可再次一键开门").arg(kDoorResetAngle));
+        setStatus(QStringLiteral("已复位至 %1°，一键开门！").arg(kDoorResetAngle));
     });
 
     if (auto *gui = qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
@@ -260,7 +260,7 @@ void BluetoothManager::updateServiceState(QLowEnergyService::ServiceState newSta
             QSettings s;
             s.setValue(QStringLiteral("ble/last_device_name"), m_lastConnectName);
         }
-        setStatus(QStringLiteral("服务就绪（已保存设备名供自动重连；若使用绑定，可在系统蓝牙中配对一次）"));
+        setStatus(QStringLiteral("服务已就绪！！！"));
     }
 }
 
@@ -351,7 +351,7 @@ void BluetoothManager::pulseOpenDoor()
 
     enqueueServoByte(kDoorSweepStart);
     enqueueServoByte(kDoorSweepEnd);
-    setStatus(QStringLiteral("开门中 (%1°→%2°)…").arg(kDoorSweepStart).arg(kDoorSweepEnd));
+    setStatus(QStringLiteral("开门中 (%1°→%2°)！！！").arg(kDoorSweepStart).arg(kDoorSweepEnd));
     m_doorPulsing = true;
     emit doorPulsingChanged();
     m_openPulseTimer->stop();

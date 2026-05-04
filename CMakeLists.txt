@@ -31,14 +31,35 @@ set_property(TARGET appod_ble PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
              ${CMAKE_CURRENT_SOURCE_DIR}/android)
 
 
-qt_add_qml_module(appod_ble
-    URI od_ble
-    VERSION 1.0
-    QML_FILES
-        Main.qml
-        RESOURCES ios/Info.plist
-        RESOURCES android/AndroidManifest.xml android/build.gradle android/res/values/libs.xml android/res/xml/qtprovider_paths.xml android/gradle/wrapper/gradle-wrapper.jar android/gradle/wrapper/gradle-wrapper.properties android/gradle.properties android/gradlew android/gradlew.bat
-)
+         qt_add_qml_module(appod_ble
+             URI od_ble
+             VERSION 1.0
+             QML_FILES
+                 Main.qml
+                 home/HomeView.qml
+                 home/HomePage.qml
+                 home/DevicePage.qml
+                 message/MessageView.qml
+                 profile/ProfileView.qml
+                 service/ServiceView.qml
+             RESOURCES
+                 # 图片资源
+                 assets/icons/home.png
+                 assets/icons/service.png
+                 assets/icons/message.png
+                 assets/icons/profile.png
+                 # 其他资源
+                 ios/Info.plist
+                 android/AndroidManifest.xml
+                 android/build.gradle
+                 android/res/values/libs.xml
+                 android/res/xml/qtprovider_paths.xml
+                 android/gradle/wrapper/gradle-wrapper.jar
+                 android/gradle/wrapper/gradle-wrapper.properties
+                 android/gradle.properties
+                 android/gradlew
+                 android/gradlew.bat
+         )
 
 # 3. 设置 iOS 捆绑包属性
 set_target_properties(appod_ble PROPERTIES
