@@ -10,14 +10,14 @@ Flickable {
     contentWidth: parent.width
     contentHeight: contentColumn.height
     anchors.fill: parent
-    clip: true // 建议加上，防止内容溢出边界
+    clip: true
 
     Column {
         id: contentColumn
         width: parent.width
-        spacing: 16
-        // 注意：Column 的 margins 属性在 QML 中不生效，需使用 padding
-        padding: 16
+        spacing: 12
+        // 这里保留 padding，作为全局的基础边距
+        padding: 12
 
         // 1. 标题
         Label {
@@ -25,6 +25,8 @@ Flickable {
             font.pixelSize: 26
             font.bold: true
             color: "#333"
+            // 补偿标题位置
+            leftPadding: 0
         }
 
         Text {
@@ -34,14 +36,13 @@ Flickable {
 
         // 2. 房间信息卡片
         Rectangle {
-            width: parent.width - 24
-            anchors.leftMargin: 12
-            anchors.rightMargin: 12
+            // 修正：宽度通过锚点固定，并保留两侧 12 间距
+            width: parent.width - (contentColumn.padding * 2)
             height: 100
             radius: 12
             color: "white"
-            // 添加阴影或边框让卡片更明显
             border.color: "#f0f0f0"
+            anchors.horizontalCenter: parent.horizontalCenter
 
             Row {
                 anchors.fill: parent
@@ -63,10 +64,7 @@ Flickable {
             }
         }
 
-        // 在 QML 的 Column 布局中，最灵活的做法是在两个组件之间插入一个透明的 Item，手动指定其高度。
-        Item {
-            width: 1; height: 30 - parent.spacing // 减去 Column 原有的 spacing
-        }
+        Item { width: 1; height: 15 } // 间距调整
 
         // 3. 开门按钮
         Rectangle {
@@ -94,33 +92,29 @@ Flickable {
                 spacing: 8
                 Text { text: "🔓"; font.pixelSize: 40; anchors.horizontalCenter: parent }
                 Text {
-                    text: btManager.doorPulsing ? "开门中…" : "点击开门"
+                    text: btManager.doorPulsing ? "开门中…" : "玄武开门"
                     color: "white"
                     anchors.horizontalCenter: parent
                 }
             }
         }
 
+        Item { width: 1; height: 15 }
 
-        // 在 QML 的 Column 布局中，最灵活的做法是在两个组件之间插入一个透明的 Item，手动指定其高度。
-        Item {
-            width: 1; height: 30 - parent.spacing // 减去 Column 原有的 spacing
-        }
-
-        // 4. 功能入口 (修正跳转逻辑)
+        // 4. 功能入口
         Row {
             id: functionEntry
-            width: parent.width - 24
-            anchors.leftMargin: 12
-            anchors.rightMargin: 12
+            // 修正：确保 Row 的宽度也减去 padding
+            width: parent.width - (contentColumn.padding * 2)
+            anchors.horizontalCenter: parent.horizontalCenter
             spacing: 12
 
             Repeater {
                 model: ["成员管理", "开门记录", "设备管理", "通知"]
 
                 delegate: Rectangle {
-                    // 自动计算宽度，减去 spacing
-                    width: (contentColumn.width - contentColumn.padding * 2 - 30) / 4
+                    // 动态计算宽度：(总宽 - 3个间隔) / 4
+                    width: (functionEntry.width - (3 * functionEntry.spacing)) / 4
                     height: 80
                     radius: 10
                     color: itemMouse.pressed ? "#f0f0f0" : "white"
@@ -130,15 +124,8 @@ Flickable {
                         id: itemMouse
                         anchors.fill: parent
                         onClicked: {
-                            console.log("尝试跳转到: " + modelData)
                             if (modelData === "设备管理") {
-                                // 【关键修正】：使用附加属性 StackView.view
-                                // 不要使用 homeStack.view
-                                if (root.stack) {
-                                    root.stack.push("DevicePage.qml")
-                                } else {
-                                    console.error("依然找不到 StackView")
-                                }
+                                if (root.stack) root.stack.push("DevicePage.qml")
                             }
                         }
                     }
@@ -153,33 +140,51 @@ Flickable {
             }
         }
 
-        // 5. 数据卡片
+        // 5. 数据卡片 (均匀排布 + 两侧 12 边距)
         Rectangle {
-            width: parent.width - 24
-            anchors.leftMargin: 12
-            anchors.rightMargin: 12
-            height: 100
+            width: parent.width - (contentColumn.padding * 2)
+            height: 200
             radius: 12
             color: "white"
             border.color: "#f0f0f0"
+            anchors.horizontalCenter: parent.horizontalCenter
 
             GridLayout {
                 anchors.fill: parent
                 columns: 4
-                rows: 1
+                rows: 2
+                columnSpacing: 0
+                rowSpacing: 0
 
-                // 内部使用延展布局更整齐
                 Repeater {
                     model: [
-                        {t: "温度", v: "26°C"},
-                        {t: "湿度", v: "50%"},
-                        {t: "电量", v: "85%"},
-                        {t: "安全", v: "正常"}
+                        {t: "温度", v: "26°C"}, {t: "湿度", v: "50%"},
+                        {t: "电量", v: "85%"}, {t: "安全", v: "正常"},
+                        {t: "电压", v: "7.4V"}, {t: "电流", v: "0.2A"},
+                        {t: "功率", v: "1.48W"}, {t: "耗电", v: "0.01度"}
                     ]
-                    Column {
-                        Layout.alignment: Qt.AlignCenter
-                        Text { text: modelData.t; color: "#888"; font.pixelSize: 12; anchors.horizontalCenter: parent }
-                        Text { text: modelData.v; font.bold: true; anchors.horizontalCenter: parent }
+
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+
+                        Column {
+                            anchors.centerIn: parent
+                            spacing: 4
+                            Text {
+                                text: modelData.t
+                                color: "#888"
+                                font.pixelSize: 12
+                                anchors.horizontalCenter: parent
+                            }
+                            Text {
+                                text: modelData.v
+                                font.bold: true
+                                font.pixelSize: 14
+                                color: "#333"
+                                anchors.horizontalCenter: parent
+                            }
+                        }
                     }
                 }
             }
