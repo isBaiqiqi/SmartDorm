@@ -1,9 +1,8 @@
-// main.qml
+﻿// main.qml
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// 假设这些目录和文件已经存在
 import "home"
 import "message"
 import "service"
@@ -16,26 +15,12 @@ ApplicationWindow {
     height: 640
     title: "智慧寝室"
 
-    // --- 顶部标题栏 (根据需要取消注释) ---
-    /*
-    header: ToolBar {
-        background: Rectangle { color: "#4a8ffc" }
-        Label {
-            text: ["首页", "服务", "消息", "我的"][tabBar.currentIndex]
-            anchors.left: parent.left
-            anchors.leftMargin: 15
-            anchors.verticalCenter: parent.verticalCenter
-            font.pixelSize: 20
-            font.bold: true
-            color: "white"
-        }
-    }
-    */
-
     StackLayout {
         id: mainLayout
         anchors.fill: parent
-        currentIndex: tabBar.currentIndex
+        currentIndex: floatingTabBar.currentIndex
+        // 底部留出悬浮导航栏的空间
+        anchors.bottomMargin: floatingTabBar.height + floatingTabBar.anchors.bottomMargin + 16
 
         HomeView {}
         ServiceView {}
@@ -43,61 +28,96 @@ ApplicationWindow {
         ProfileView {}
     }
 
-    footer: TabBar {
-        id: tabBar
-        readonly property bool isIos: Qt.platform.os === "ios"
+    // --- 悬浮胶囊式底部导航栏 ---
+    Item {
+        id: floatingTabBar
+        property int currentIndex: 0
+        readonly property int tabCount: 4
+        readonly property real capsuleWidth: Math.min(window.width - 32, 400)
+        readonly property real tabWidth: (capsuleWidth - 8) / tabCount
+        readonly property real highlightPadding: 6
 
-        // 1. 固定一个较大的高度（适配 iOS 和安卓的留白）
-        // iOS 给 85, 安卓给 70（或者你喜欢的数值）
-        implicitHeight: isIos ? 85 : 70
+        anchors {
+            horizontalCenter: parent.horizontalCenter
+            bottom: parent.bottom
+            bottomMargin: Qt.platform.os === "ios" ? 28 : 12
+        }
+        width: capsuleWidth
+        height: 64
 
-        background: Rectangle {
-            color: "#ffffff"
-            Rectangle { width: parent.width; height: 1; color: "#e0e0e0"; anchors.top: parent.top }
+        // 胶囊背景
+        Rectangle {
+            id: capsuleBg
+            anchors.fill: parent
+            radius: height / 2
+            color: "#fafafa"
+            border { width: 0.5; color: "#e8e8e8" }
         }
 
-        component MyTabButton: TabButton {
-            property alias iconSource: img.source
-            property alias tabText: txt.text
+        // 选中高亮背景块（平滑平移动画）
+        Rectangle {
+            id: highlight
+            width: floatingTabBar.tabWidth - floatingTabBar.highlightPadding * 2
+            height: parent.height - 12
+            radius: (parent.height - 12) / 2
+            color: "#f3e8f7"
+            y: 6
+            x: floatingTabBar.highlightPadding + floatingTabBar.currentIndex * floatingTabBar.tabWidth
 
-            // 1. 关键：将 topPadding 设小，bottomPadding 设大
-            // 这样按钮的感应区域依然是整个高度，但内容被底部的 padding 挤到了上方
-            topPadding: 10
-            bottomPadding: window.footer.isIos ? 35 : 20
-
-            contentItem: ColumnLayout {
-                // 2. 这里不再需要 anchors.fill: parent，让它自然布局
-                spacing: 4
-
-                Image {
-                    id: img
-                    Layout.alignment: Qt.AlignHCenter
-                    sourceSize: Qt.size(24, 24)
-                    // 使用 parent.parent 指向 TabButton
-                    opacity: parent.parent.checked ? 1.0 : 0.5
+            Behavior on x {
+                NumberAnimation {
+                    duration: 280
+                    easing.type: Easing.OutCubic
                 }
-                Text {
-                    id: txt
-                    Layout.alignment: Qt.AlignHCenter
-                    text: tabText
-                    font.pixelSize: 12
-                    color: parent.parent.checked ? "#4a8ffc" : "#888888"
-                }
-            }
-
-            // 3. 背景设为透明，但确保它占满空间，增加点击命中率
-            background: Rectangle {
-                color: "transparent"
-                // 可以在这里加个显式的大小限制，确保点击区域完整
-                implicitWidth: 60
-                implicitHeight: parent.height
             }
         }
 
-        // 按钮实例保持不变...
-        MyTabButton { iconSource: "assets/icons/home.png"; tabText: "首页" }
-        MyTabButton { iconSource: "assets/icons/service.png"; tabText: "服务" }
-        MyTabButton { iconSource: "assets/icons/message.png"; tabText: "消息" }
-        MyTabButton { iconSource: "assets/icons/profile.png"; tabText: "我的" }
+        // Tab 项
+        Row {
+            anchors {
+                fill: parent
+                leftMargin: 4
+                rightMargin: 4
+            }
+
+            Repeater {
+                model: [
+                    { icon: "assets/icons/home.png",     label: "首页" },
+                    { icon: "assets/icons/service.png",  label: "设备" },
+                    { icon: "assets/icons/message.png",  label: "消息" },
+                    { icon: "assets/icons/profile.png",  label: "我的" }
+                ]
+
+                delegate: Item {
+                    width: floatingTabBar.tabWidth
+                    height: parent.height
+
+                    Column {
+                        anchors.centerIn: parent
+                        spacing: 4
+
+                        Image {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            source: modelData.icon
+                            sourceSize: Qt.size(22, 22)
+                            opacity: index === floatingTabBar.currentIndex ? 1.0 : 0.45
+                        }
+
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: modelData.label
+                            font.pixelSize: 11
+                            font.weight: index === floatingTabBar.currentIndex ? Font.DemiBold : Font.Normal
+                            color: index === floatingTabBar.currentIndex ? "#c44d82" : "#999999"
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: floatingTabBar.currentIndex = index
+                    }
+                }
+            }
+        }
     }
 }

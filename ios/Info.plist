@@ -28,5 +28,9 @@
 	<string>我们需要蓝牙扫描附近的设备。</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+	</array>
 </dict>
 </plist>

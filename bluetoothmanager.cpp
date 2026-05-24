@@ -1,4 +1,4 @@
-#include "bluetoothmanager.h"
+﻿#include "bluetoothmanager.h"
 #include <QDebug>
 #include <QBluetoothDeviceInfo>
 #include <QBluetoothAddress>
@@ -11,25 +11,22 @@
 #include <QPermissions>
 #endif
 
-// 必须严格包含这三个，且顺序建议如下
 #include <QLowEnergyController>
 #include <QLowEnergyService>
 #include <QLowEnergyCharacteristic>
-
-// 如果还是报错，请添加这一行（强制包含完整定义）
 #include <QtBluetooth/QLowEnergyController>
 
 namespace {
-constexpr int kDoorSweepStart = 90;  // 开门起始角
-constexpr int kDoorSweepEnd = 20;   // 开门到位角
-constexpr int kDoorResetAngle = 90;  // 2s 后复位（idle）
+constexpr int kDoorSweepStart = 90;
+constexpr int kDoorSweepEnd = 20;
+constexpr int kDoorResetAngle = 90;
+constexpr int kDirectConnectTimeout = 5000;
 }
 
 BluetoothManager::BluetoothManager(QObject *parent) : QObject(parent) {
     m_discoveryAgent = new QBluetoothDeviceDiscoveryAgent(this);
     connect(m_discoveryAgent, &QBluetoothDeviceDiscoveryAgent::deviceDiscovered,
             this, &BluetoothManager::addDevice);
-
     connect(m_discoveryAgent, &QBluetoothDeviceDiscoveryAgent::finished,
             this, &BluetoothManager::discoveryFinished);
     connect(m_discoveryAgent, &QBluetoothDeviceDiscoveryAgent::canceled,
@@ -46,6 +43,15 @@ BluetoothManager::BluetoothManager(QObject *parent) : QObject(parent) {
         setStatus(QStringLiteral("已复位至 %1°，一键开门！").arg(kDoorResetAngle));
     });
 
+    m_connectTimeoutTimer = new QTimer(this);
+    m_connectTimeoutTimer->setSingleShot(true);
+    connect(m_connectTimeoutTimer, &QTimer::timeout, this, [this]() {
+        if (!m_isConnected && m_controller) {
+            setStatus(QStringLiteral("直连超时，请手动扫描或点击已配对设备重试"));
+            stopController();
+        }
+    });
+
     if (auto *gui = qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
         connect(gui, &QGuiApplication::applicationStateChanged, this,
                 [this](Qt::ApplicationState state) {
@@ -53,6 +59,8 @@ BluetoothManager::BluetoothManager(QObject *parent) : QObject(parent) {
                         tryAutoReconnectFromForeground();
                 });
     }
+
+    loadSavedDevices();
 
     QTimer::singleShot(1200, this, &BluetoothManager::tryAutoReconnectOnStartup);
 }
@@ -71,6 +79,142 @@ void BluetoothManager::setStatus(const QString &status)
         return;
     m_status = status;
     emit statusChanged();
+}
+
+void BluetoothManager::setConnectedDeviceName(const QString &name)
+{
+    if (m_connectedDeviceName == name)
+        return;
+    m_connectedDeviceName = name;
+    emit connectedDeviceNameChanged();
+}
+
+void BluetoothManager::loadSavedDevices()
+{
+    QSettings s;
+    QStringList names = s.value(QStringLiteral("ble/saved_device_names")).toStringList();
+    QStringList addrs = s.value(QStringLiteral("ble/saved_device_addresses")).toStringList();
+    m_savedDevices.clear();
+    m_savedDeviceMap.clear();
+    for (int i = 0; i < names.size() && i < addrs.size(); ++i) {
+        if (!names[i].isEmpty() && !addrs[i].isEmpty()) {
+            m_savedDevices.append(names[i]);
+            m_savedDeviceMap[names[i]] = addrs[i];
+        }
+    }
+    emit savedDevicesChanged();
+}
+
+void BluetoothManager::saveDevice(const QString &name, const QString &address)
+{
+    QSettings s;
+    QStringList names = s.value(QStringLiteral("ble/saved_device_names")).toStringList();
+    QStringList addrs = s.value(QStringLiteral("ble/saved_device_addresses")).toStringList();
+
+    int idx = names.indexOf(name);
+    if (idx >= 0) {
+        addrs[idx] = address;
+    } else {
+        names.append(name);
+        addrs.append(address);
+    }
+    s.setValue(QStringLiteral("ble/saved_device_names"), names);
+    s.setValue(QStringLiteral("ble/saved_device_addresses"), addrs);
+    loadSavedDevices();
+}
+
+void BluetoothManager::forgetSavedDevice(const QString &name)
+{
+    QSettings s;
+    QStringList names = s.value(QStringLiteral("ble/saved_device_names")).toStringList();
+    QStringList addrs = s.value(QStringLiteral("ble/saved_device_addresses")).toStringList();
+
+    int idx = names.indexOf(name);
+    if (idx >= 0) {
+        names.removeAt(idx);
+        addrs.removeAt(idx);
+        s.setValue(QStringLiteral("ble/saved_device_names"), names);
+        s.setValue(QStringLiteral("ble/saved_device_addresses"), addrs);
+    }
+
+    if (m_lastConnectName == name) {
+        QSettings().remove(QStringLiteral("ble/last_device_name"));
+    }
+
+    loadSavedDevices();
+    setStatus(QStringLiteral("已解除配对：%1").arg(name));
+}
+
+void BluetoothManager::stopController()
+{
+    if (m_connectTimeoutTimer)
+        m_connectTimeoutTimer->stop();
+    if (m_controller) {
+        m_controller->disconnectFromDevice();
+        m_controller->deleteLater();
+        m_controller = nullptr;
+    }
+}
+
+void BluetoothManager::disconnectFromDevice()
+{
+    if (m_controller) {
+        m_controller->disconnectFromDevice();
+        setStatus(QStringLiteral("正在断开连接…"));
+    }
+}
+
+void BluetoothManager::connectToSavedDevice(const QString &name)
+{
+    if (m_isConnected)
+        return;
+
+    QString address = m_savedDeviceMap.value(name);
+    if (address.isEmpty()) {
+        setStatus(QStringLiteral("保存的设备地址无效，请重新扫描连接"));
+        return;
+    }
+
+    stopController();
+
+    QBluetoothDeviceInfo info(QBluetoothAddress(address), name, 0);
+    if (info.address().isNull()) {
+        setStatus(QStringLiteral("连接失败：地址无效"));
+        return;
+    }
+
+    if (m_discoveryAgent && m_discoveryAgent->isActive())
+        m_discoveryAgent->stop();
+
+    m_lastConnectName = name;
+    m_connectedDeviceAddress = address;
+    m_controller = QLowEnergyController::createCentral(info, this);
+
+    connect(m_controller, &QLowEnergyController::connected, this, [this](){
+        m_connectTimeoutTimer->stop();
+        setConnectedDeviceName(m_lastConnectName);
+        setStatus(QStringLiteral("已连接，发现服务中…"));
+        m_controller->discoverServices();
+    });
+    connect(m_controller, &QLowEnergyController::disconnected, this, [this]() {
+        clearDoorPulse();
+        clearServoWriteState();
+        m_isConnected = false;
+        m_service = nullptr;
+        setConnectedDeviceName(QString());
+        emit connectedChanged();
+        setStatus(QStringLiteral("已断开连接"));
+    });
+    connect(m_controller, &QLowEnergyController::serviceDiscovered,
+            this, &BluetoothManager::serviceDiscovered);
+    connect(m_controller, &QLowEnergyController::errorOccurred, this, [this](QLowEnergyController::Error){
+        setStatus(QStringLiteral("直连失败：%1，可尝试扫描连接").arg(m_controller ? m_controller->errorString() : QString()));
+        stopController();
+    });
+
+    setStatus(QStringLiteral("正在直连：%1").arg(name));
+    m_connectTimeoutTimer->start(kDirectConnectTimeout);
+    m_controller->connectToDevice();
 }
 
 void BluetoothManager::startDiscovery() {
@@ -141,22 +285,40 @@ void BluetoothManager::tryAutoReconnectOnStartup()
 {
     if (m_isConnected)
         return;
-    QSettings s;
-    if (s.value(QStringLiteral("ble/last_device_name")).toString().isEmpty())
+
+    loadSavedDevices();
+
+    if (!m_savedDevices.isEmpty()) {
+        QString name = m_savedDevices.first().toString();
+        connectToSavedDevice(name);
         return;
-    startDiscoveryWithAutoFlag(true);
+    }
+
+    QSettings s;
+    if (!s.value(QStringLiteral("ble/last_device_name")).toString().isEmpty())
+        startDiscoveryWithAutoFlag(true);
 }
 
 void BluetoothManager::tryAutoReconnectFromForeground()
 {
     if (m_isConnected)
         return;
+    if (m_discoveryAgent && m_discoveryAgent->isActive())
+        return;
+    if (m_controller && m_controller->state() != QLowEnergyController::ConnectedState)
+        return;
+
+    loadSavedDevices();
+
+    if (!m_savedDevices.isEmpty()) {
+        QString name = m_savedDevices.first().toString();
+        connectToSavedDevice(name);
+        return;
+    }
+
     QSettings s;
-    if (s.value(QStringLiteral("ble/last_device_name")).toString().isEmpty())
-        return;
-    if (m_discoveryAgent->isActive())
-        return;
-    startDiscoveryWithAutoFlag(true);
+    if (!s.value(QStringLiteral("ble/last_device_name")).toString().isEmpty())
+        startDiscoveryWithAutoFlag(true);
 }
 
 void BluetoothManager::addDevice(const QBluetoothDeviceInfo &device) {
@@ -183,9 +345,9 @@ void BluetoothManager::discoveryFinished()
 {
     setScanning(false);
     if (m_devices.isEmpty()) {
-        setStatus(QStringLiteral("扫描结束：未发现设备（确认 ESP32 在广播 & 手机蓝牙已开）"));
+        setStatus(QStringLiteral("扫描结束：未发现设备（确认设备在广播 & 手机蓝牙已开）"));
     } else {
-        setStatus(QStringLiteral("扫描结束：发现 %1 台").arg(m_devices.size()));
+        setStatus(QStringLiteral("扫描结束：发现 %1 台设备").arg(m_devices.size()));
     }
     m_autoReconnectScan = false;
 }
@@ -204,14 +366,14 @@ void BluetoothManager::connectToDevice(const QString &name) {
 
     for (const auto &info : m_foundDevices) {
         if (info.name() == name || info.address().toString() == name) {
-            if (m_controller) {
-                m_controller->disconnectFromDevice();
-                m_controller->deleteLater();
-            }
+            stopController();
+
             m_lastConnectName = name;
+            m_connectedDeviceAddress = info.address().toString();
             m_controller = QLowEnergyController::createCentral(info, this);
 
             connect(m_controller, &QLowEnergyController::connected, this, [this](){
+                setConnectedDeviceName(m_lastConnectName);
                 setStatus(QStringLiteral("已连接，发现服务中…"));
                 m_controller->discoverServices();
             });
@@ -220,19 +382,20 @@ void BluetoothManager::connectToDevice(const QString &name) {
                 clearServoWriteState();
                 m_isConnected = false;
                 m_service = nullptr;
+                setConnectedDeviceName(QString());
                 emit connectedChanged();
                 setStatus(QStringLiteral("已断开连接"));
             });
             connect(m_controller, &QLowEnergyController::serviceDiscovered,
                     this, &BluetoothManager::serviceDiscovered);
-
             connect(m_controller, &QLowEnergyController::errorOccurred, this, [this](QLowEnergyController::Error){
                 setStatus(QStringLiteral("连接失败：%1").arg(m_controller ? m_controller->errorString() : QString()));
+                stopController();
             });
 
             setStatus(QStringLiteral("正在连接：%1").arg(name));
             m_controller->connectToDevice();
-            break;
+            return;
         }
     }
 }
@@ -259,6 +422,9 @@ void BluetoothManager::updateServiceState(QLowEnergyService::ServiceState newSta
         if (!m_lastConnectName.isEmpty()) {
             QSettings s;
             s.setValue(QStringLiteral("ble/last_device_name"), m_lastConnectName);
+            if (!m_connectedDeviceAddress.isEmpty()) {
+                saveDevice(m_lastConnectName, m_connectedDeviceAddress);
+            }
         }
         setStatus(QStringLiteral("服务已就绪！！！"));
     }
@@ -300,7 +466,6 @@ void BluetoothManager::tryStartNextServoWrite()
     QByteArray data;
     data.append(static_cast<char>(angle));
 
-    // 若从机声明了 WriteWithoutResponse，优先用它：对端不必等 ATT 写响应，更不易因从机忙而断连
     QLowEnergyService::WriteMode mode = QLowEnergyService::WriteWithResponse;
     if (props.testFlag(QLowEnergyCharacteristic::WriteNoResponse))
         mode = QLowEnergyService::WriteWithoutResponse;
