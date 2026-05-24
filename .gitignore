@@ -5,3 +5,4 @@ build/
 
 # 文件
 *.user
+*.DS_Store
